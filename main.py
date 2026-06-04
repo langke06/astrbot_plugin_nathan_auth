@@ -42,6 +42,7 @@ class NathanAuthPlugin(Star):
             self.default_ip = getattr(config, "default_ip", "127.0.0.1")
             self.admin_qqs = getattr(config, "admin_qqs", [])
             self.admin_groups = getattr(config, "admin_groups", [])
+            self.blacklist_qqs = getattr(config, "blacklist_qqs", [])
         else:
             # 使用空默认值
             self.base_url = ""
@@ -53,6 +54,7 @@ class NathanAuthPlugin(Star):
             self.default_ip = "127.0.0.1"
             self.admin_qqs = []
             self.admin_groups = []
+            self.blacklist_qqs = []
 
         # 初始化客户端
         self.client = None
@@ -113,15 +115,48 @@ class NathanAuthPlugin(Star):
             pass
         return "Nathan-Auth"
 
-    def _check_permission(self, event: AstrMessageEvent) -> bool:
-        """检查用户是否有权限使用命令"""
-        # 如果没有配置管理员，允许所有人使用（不推荐）
-        if not self.admin_qqs and not self.admin_groups:
-            return True
+    def _is_blacklisted(self, event: AstrMessageEvent) -> bool:
+        """检查用户是否在黑名单中"""
+        sender_id = event.get_sender_id()
+        return self.blacklist_qqs and sender_id in self.blacklist_qqs
+
+    def _is_admin(self, event: AstrMessageEvent) -> bool:
+        """检查用户是否是管理员"""
+        sender_id = event.get_sender_id()
 
         # 检查QQ是否在管理员列表中
-        sender_id = event.get_sender_id()
         if self.admin_qqs and sender_id in self.admin_qqs:
+            return True
+
+        return False
+
+    def _check_permission(self, event: AstrMessageEvent, allow_guest: bool = False) -> bool:
+        """
+        检查用户是否有权限使用命令
+
+        Args:
+            event: 消息事件
+            allow_guest: 是否允许普通用户使用（查询功能）
+
+        Returns:
+            是否有权限
+        """
+        sender_id = event.get_sender_id()
+
+        # 检查是否在黑名单中
+        if self._is_blacklisted(event):
+            return False
+
+        # 管理员始终有权限
+        if self._is_admin(event):
+            return True
+
+        # 如果允许普通用户使用
+        if allow_guest:
+            return True
+
+        # 如果没有配置管理员，允许所有人使用（不推荐）
+        if not self.admin_qqs and not self.admin_groups:
             return True
 
         # 检查是否在允许的群组中
@@ -138,24 +173,7 @@ class NathanAuthPlugin(Star):
 
     @filter.command("授权")
     async def plan_command(self, event: AstrMessageEvent):
-        '''Nathan-Auth 授权管理命令 - 用法：/授权 [操作] [参数...]
-
-        可用操作：
-        /授权 - 显示帮助菜单
-        /授权 查询 <域名> - 查询域名授权状态
-        /授权 添加 <域名> <QQ> [天数] - 添加域名授权
-        /授权 封禁 <域名> <原因> - 封禁域名授权
-        /授权 解封 <域名> - 解封域名授权
-        /授权 删除 <域名> - 删除域名授权
-        /授权 应用列表 - 获取应用列表
-        /授权 生成卡密 <类型> <数量> [天数] - 生成卡密（类型：1=余额卡密，2=授权卡密）
-        /授权 更换 <旧域名> <新域名> <QQ> - 更换授权域名
-        /授权 授权码 <域名> - 获取域名授权码
-        '''
-        # 检查权限
-        if not self._check_permission(event):
-            yield event.plain_result("❌ 叼毛，让你用了吗。你就用！！！！")
-            return
+        '''Nathan-Auth 授权管理命令 - 用法：/授权 [操作] [参数...]'''
 
         # 检查配置
         if not self._check_config():
@@ -173,18 +191,38 @@ class NathanAuthPlugin(Star):
         action = parts[0] if len(parts) > 0 else ""
         args = parts[1:] if len(parts) > 1 else []
 
-        # 显示菜单
+        # 显示菜单（无需权限检查）
         if not action:
             async for result in self._show_menu(event):
                 yield result
             return
 
-        # 处理各种操作
+        # 查询功能允许普通用户使用（除非在黑名单）
+        if action == "查询":
+            if not self._check_permission(event, allow_guest=True):
+                yield event.plain_result("❌ 你已被禁止使用此功能")
+                return
+            async for result in self._handle_query(event, args):
+                yield result
+            return
+
+        # 更换授权功能：普通用户可以使用，但自动使用自己的QQ
+        if action == "更换" or action == "更改授权":
+            if not self._check_permission(event, allow_guest=True):
+                yield event.plain_result("❌ 你已被禁止使用此功能")
+                return
+            async for result in self._handle_replace(event, args):
+                yield result
+            return
+
+        # 其他功能需要管理员权限
+        if not self._check_permission(event):
+            yield event.plain_result("❌ 你没有权限使用此命令")
+            return
+
+        # 处理管理员功能
         try:
-            if action == "查询":
-                async for result in self._handle_query(event, args):
-                    yield result
-            elif action == "添加":
+            if action == "添加":
                 async for result in self._handle_add(event, args):
                     yield result
             elif action == "封禁":
@@ -202,9 +240,6 @@ class NathanAuthPlugin(Star):
             elif action == "生成卡密":
                 async for result in self._handle_create_card(event, args):
                     yield result
-            elif action == "更换":
-                async for result in self._handle_replace(event, args):
-                    yield result
             elif action == "授权码":
                 async for result in self._handle_authcode(event, args):
                     yield result
@@ -216,21 +251,10 @@ class NathanAuthPlugin(Star):
 
     async def _show_menu(self, event: AstrMessageEvent):
         """显示帮助菜单"""
-        menu_text = f"""{self.site_name} 授权管理插件
+        is_admin = self._is_admin(event)
 
-命令列表：
-━━━━━━━━━━━━━━━━
-/授权 - 显示此菜单
-/授权 查询 <域名> - 查询域名授权状态
-/授权 添加 <域名> <QQ> [天数] - 添加域名授权
-/授权 封禁 <域名> <原因> - 封禁域名授权
-/授权 解封 <域名> - 解封域名授权
-/授权 删除 <域名> - 删除域名授权
-/授权 应用列表 - 获取应用列表
-/授权 生成卡密 <类型> <数量> [天数] - 生成卡密
-/授权 更换 <旧域名> <新域名> <QQ> - 更换授权域名
-/授权 授权码 <域名> - 获取域名授权码
-━━━━━━━━━━━━━━━━
+        if is_admin:
+            menu_text = f"""{self.site_name} 授权管理插件
 
 使用示例：
 • /授权 查询 example.com
@@ -246,6 +270,17 @@ class NathanAuthPlugin(Star):
 说明：
 • 天数为0表示永久授权
 • 卡密类型：1=余额卡密，2=授权卡密
+"""
+        else:
+            menu_text = f"""{self.site_name} 授权管理插件
+
+使用示例：
+• /授权 查询 example.com
+• /授权 更换 old.com new.com
+
+说明：
+• 查询功能对所有用户开放
+• 更换授权会自动使用你的QQ
 """
         yield event.plain_result(menu_text)
 
@@ -433,13 +468,25 @@ class NathanAuthPlugin(Star):
 
     async def _handle_replace(self, event: AstrMessageEvent, args):
         """处理更换授权域名"""
-        if len(args) < 3:
-            yield event.plain_result("❌ 用法：/授权 更换 <旧域名> <新域名> <QQ>\n示例：/授权 更换 old.com new.com 123456789")
-            return
+        is_admin = self._is_admin(event)
+        sender_qq = event.get_sender_id()
 
-        old_domain = args[0]
-        new_domain = args[1]
-        qq = args[2]
+        if is_admin:
+            # 管理员：需要旧域名、新域名、QQ
+            if len(args) < 3:
+                yield event.plain_result("❌ 用法：/授权 更换 <旧域名> <新域名> <QQ>\n示例：/授权 更换 old.com new.com 123456789")
+                return
+            old_domain = args[0]
+            new_domain = args[1]
+            qq = args[2]
+        else:
+            # 普通用户：只需要旧域名和新域名，自动使用发送者的QQ
+            if len(args) < 2:
+                yield event.plain_result("❌ 用法：/授权 更换 <旧域名> <新域名>\n示例：/授权 更换 old.com new.com")
+                return
+            old_domain = args[0]
+            new_domain = args[1]
+            qq = sender_qq
 
         yield event.plain_result(f"📝 正在更换授权域名，请稍候...")
 
@@ -456,7 +503,12 @@ class NathanAuthPlugin(Star):
 🌐 新域名：{new_domain}
 👤 QQ：{qq}"""
         else:
-            reply = f"❌ 更换失败：{result.get('msg', '未知错误')}"
+            error_msg = result.get('msg', '未知错误')
+            if not is_admin:
+                # 普通用户更换失败，提示使用绑定的QQ
+                reply = f"❌ 更换失败：{error_msg}\n\n💡 提示：请使用绑定该授权的QQ号来发送此指令"
+            else:
+                reply = f"❌ 更换失败：{error_msg}"
 
         yield event.plain_result(reply)
 
