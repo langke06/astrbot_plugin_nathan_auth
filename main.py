@@ -18,7 +18,7 @@ from .nathan_auth_client import NathanAuthClient
     "astrbot_plugin_nathan_auth",
     "langke06",
     "Nathan-Auth 授权管理插件，支持域名授权管理、封禁解封、查询等功能",
-    "1.2.0",
+    "1.3.0",
 )
 class NathanAuthPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -196,30 +196,21 @@ class NathanAuthPlugin(Star):
                 yield result
             return
 
-        # 查询功能允许普通用户使用（除非在黑名单）
-        if action == "查询":
-            if not self._check_permission(event, allow_guest=True):
-                yield event.plain_result("❌ 你已被禁止使用此功能")
-                return
-            async for result in self._handle_query(event, args):
-                yield result
-            return
-
-        # 更换授权功能：普通用户可以使用，但自动使用自己的QQ
-        if action == "更换" or action == "更改授权":
-            if not self._check_permission(event, allow_guest=True):
-                yield event.plain_result("❌ 你已被禁止使用此功能")
-                return
-            async for result in self._handle_replace(event, args):
-                yield result
-            return
-
-        # 查询授权功能：所有用户可用，默认查询自己的QQ
+        # 查询授权：智能识别域名或QQ（所有用户可用）
         if action == "查询授权":
             if not self._check_permission(event, allow_guest=True):
                 yield event.plain_result("❌ 你已被禁止使用此功能")
                 return
-            async for result in self._handle_query_auth_by_qq(event, args):
+            async for result in self._handle_query_auth(event, args):
+                yield result
+            return
+
+        # 更改域名（普通用户也可用，自动使用自己的QQ）
+        if action == "更改域名" or action == "更改授权":
+            if not self._check_permission(event, allow_guest=True):
+                yield event.plain_result("❌ 你已被禁止使用此功能")
+                return
+            async for result in self._handle_replace(event, args):
                 yield result
             return
 
@@ -239,7 +230,7 @@ class NathanAuthPlugin(Star):
 
         # 处理管理员功能
         try:
-            if action == "添加":
+            if action == "添加授权":
                 async for result in self._handle_add(event, args):
                     yield result
             elif action == "封禁":
@@ -248,7 +239,7 @@ class NathanAuthPlugin(Star):
             elif action == "解封":
                 async for result in self._handle_unseal(event, args):
                     yield result
-            elif action == "删除":
+            elif action == "删除授权":
                 async for result in self._handle_delete(event, args):
                     yield result
             elif action == "应用列表":
@@ -271,22 +262,23 @@ class NathanAuthPlugin(Star):
         menu_text = f"""{self.site_name} 授权管理插件
 
 使用示例：
-• /授权 查询 example.com
+• /授权 查询授权 example.com
 • /授权 查询授权 [QQ]
 • /授权 代理查询 [QQ]
-• /授权 添加 example.com 123456789
-• /授权 添加 example.com 123456789 365
+• /授权 添加授权 example.com 123456789
+• /授权 添加授权 example.com 123456789 365
 • /授权 封禁 example.com 违规使用
 • /授权 解封 example.com
-• /授权 删除 example.com
+• /授权 删除授权 example.com
 • /授权 生成卡密 2 10 365
-• /授权 更换 old.com new.com 123456789
+• /授权 更改域名 old.com new.com 123456789
 • /授权 授权码 example.com
 
 说明：
 • 天数为0表示永久授权
 • 卡密类型：1=余额卡密，2=授权卡密
 • [QQ]为可选参数，不填则查询/使用你自己的QQ
+• 普通用户：/授权 更改域名 old.com new.com（自动用你的QQ）
 """
         yield event.plain_result(menu_text)
 
@@ -298,16 +290,16 @@ class NathanAuthPlugin(Star):
             menu_text = f"""{self.site_name} 授权管理插件
 
 使用示例：
-• /授权 查询 example.com
+• /授权 查询授权 example.com
 • /授权 查询授权 [QQ]
 • /授权 代理查询 [QQ]
-• /授权 添加 example.com 123456789
-• /授权 添加 example.com 123456789 365
+• /授权 添加授权 example.com 123456789
+• /授权 添加授权 example.com 123456789 365
 • /授权 封禁 example.com 违规使用
 • /授权 解封 example.com
-• /授权 删除 example.com
+• /授权 删除授权 example.com
 • /授权 生成卡密 2 10 365
-• /授权 更换 old.com new.com 123456789
+• /授权 更改域名 old.com new.com 123456789
 • /授权 授权码 example.com
 
 说明：
@@ -319,47 +311,68 @@ class NathanAuthPlugin(Star):
             menu_text = f"""{self.site_name} 授权管理插件
 
 使用示例：
-• /授权 查询 example.com
+• /授权 查询授权 example.com
 • /授权 查询授权
 • /授权 代理查询
-• /授权 更换 old.com new.com
+• /授权 更改域名 old.com new.com
 
 说明：
 • 查询功能对所有用户开放
 • 查询授权/代理查询默认使用你的QQ
-• 更换授权会自动使用你的QQ
+• 更改域名会自动使用你的QQ
 """
         yield event.plain_result(menu_text)
 
-    async def _handle_query(self, event: AstrMessageEvent, args):
-        """处理查询授权"""
-        if len(args) < 1:
-            yield event.plain_result("❌ 用法：/授权 查询 <域名>\n示例：/授权 查询 example.com")
-            return
+    async def _handle_query_auth(self, event: AstrMessageEvent, args):
+        """处理查询授权 - 智能识别域名或QQ"""
+        sender_qq = event.get_sender_id()
 
-        domain = args[0]
-        result = await self.client.query_auth(self.default_appid, domain)
-
-        if str(result.get("code")) == "1":
-            data = result.get("data", {})
-            status_text = "✅ 正常" if data.get("status") == "1" else "❌ 封禁"
-            reply = f"""📋 授权查询结果
-
-🌐 域名：{domain}
-📊 状态：{status_text}
-👤 QQ：{data.get('qq', '未知')}
-📧 邮箱：{data.get('email', '未知')}
-📅 到期时间：{data.get('authdate', '未知')}
-📝 授权码：{data.get('authcode', '未知')}"""
+        if len(args) >= 1:
+            arg = args[0]
+            # 包含 '.' 的视为域名查询，否则视为QQ查询
+            if "." in arg:
+                # 域名查询
+                domain = arg
+                # 请求前先获取 cookie
+                await self.client._ensure_cookie()
+                result = await self.client.query_auth(self.default_appid, domain)
+                if str(result.get("code")) == "1":
+                    data = result.get("data", {})
+                    status_text = "正常" if data.get("status") == "1" else "封禁"
+                    reply = f"查询结果\n域名：{domain}\n状态：{status_text}\nQQ：{data.get('qq', '未知')}\n邮箱：{data.get('email', '未知')}\n到期：{data.get('authdate', '未知')}\n授权码：{data.get('authcode', '未知')}"
+                else:
+                    reply = f"查询失败：{result.get('msg', '未知错误')}"
+            else:
+                # QQ查询
+                qq = arg
+                yield event.plain_result(f"正在查询QQ {qq} 的授权，请稍候...")
+                result = await self.client.query_auth_by_qq(appid=self.default_appid, qq=qq)
+                code = result.get("code")
+                if code == 1 or str(code) == "1":
+                    msg = self.client._strip_html(result.get("msg", ""))
+                    reply = f"查询结果（QQ: {qq}）：\n{msg}" if msg else f"查询成功（QQ: {qq}）"
+                else:
+                    msg = self.client._strip_html(result.get("msg", "未找到相关授权信息"))
+                    reply = f"{msg}"
         else:
-            reply = f"❌ 查询失败：{result.get('msg', '未知错误')}"
+            # 无参数：查询发送者自己的QQ
+            qq = sender_qq
+            yield event.plain_result(f"正在查询你的授权，请稍候...")
+            result = await self.client.query_auth_by_qq(appid=self.default_appid, qq=qq)
+            code = result.get("code")
+            if code == 1 or str(code) == "1":
+                msg = self.client._strip_html(result.get("msg", ""))
+                reply = f"查询结果（QQ: {qq}）：\n{msg}" if msg else f"查询成功（QQ: {qq}）"
+            else:
+                msg = self.client._strip_html(result.get("msg", "未找到相关授权信息"))
+                reply = f"{msg}"
 
         yield event.plain_result(reply)
 
     async def _handle_add(self, event: AstrMessageEvent, args):
         """处理添加授权"""
         if len(args) < 2:
-            yield event.plain_result("❌ 用法：/授权 添加 <域名> <QQ> [天数]\n示例：/授权 添加 example.com 123456789")
+            yield event.plain_result("❌ 用法：/授权 添加授权 <域名> <QQ> [天数]\n示例：/授权 添加授权 example.com 123456789")
             return
 
         domain = args[0]
@@ -431,7 +444,7 @@ class NathanAuthPlugin(Star):
     async def _handle_delete(self, event: AstrMessageEvent, args):
         """处理删除授权"""
         if len(args) < 1:
-            yield event.plain_result("❌ 用法：/授权 删除 <域名>\n示例：/授权 删除 example.com")
+            yield event.plain_result("❌ 用法：/授权 删除授权 <域名>\n示例：/授权 删除授权 example.com")
             return
 
         domain = args[0]
@@ -521,7 +534,7 @@ class NathanAuthPlugin(Star):
         if is_admin:
             # 管理员：需要旧域名、新域名、QQ
             if len(args) < 3:
-                yield event.plain_result("❌ 用法：/授权 更换 <旧域名> <新域名> <QQ>\n示例：/授权 更换 old.com new.com 123456789")
+                yield event.plain_result("❌ 用法：/授权 更改域名 <旧域名> <新域名> <QQ>\n示例：/授权 更改域名 old.com new.com 123456789")
                 return
             old_domain = args[0]
             new_domain = args[1]
@@ -529,13 +542,13 @@ class NathanAuthPlugin(Star):
         else:
             # 普通用户：只需要旧域名和新域名，自动使用发送者的QQ
             if len(args) < 2:
-                yield event.plain_result("❌ 用法：/授权 更换 <旧域名> <新域名>\n示例：/授权 更换 old.com new.com")
+                yield event.plain_result("❌ 用法：/授权 更改域名 <旧域名> <新域名>\n示例：/授权 更改域名 old.com new.com")
                 return
             old_domain = args[0]
             new_domain = args[1]
             qq = sender_qq
 
-        yield event.plain_result(f"📝 正在更换授权域名，请稍候...")
+        yield event.plain_result(f"📝 正在更改域名，请稍候...")
 
         result = await self.client.replace_auth(
             qq=qq,
@@ -544,7 +557,7 @@ class NathanAuthPlugin(Star):
         )
 
         if str(result.get("code")) == "1":
-            reply = f"""✅ 授权更换成功
+            reply = f"""✅ 域名更改成功
 
 🌐 旧域名：{old_domain}
 🌐 新域名：{new_domain}
@@ -553,9 +566,9 @@ class NathanAuthPlugin(Star):
             error_msg = result.get('msg', '未知错误')
             if not is_admin:
                 # 普通用户更换失败，提示使用绑定的QQ
-                reply = f"❌ 更换失败：{error_msg}\n\n💡 提示：请使用绑定该授权的QQ号来发送此指令"
+                reply = f"❌ 更改失败：{error_msg}\n\n💡 提示：请使用绑定该授权的QQ号来发送此指令"
             else:
-                reply = f"❌ 更换失败：{error_msg}"
+                reply = f"❌ 更改失败：{error_msg}"
 
         yield event.plain_result(reply)
 
@@ -583,38 +596,6 @@ class NathanAuthPlugin(Star):
 🔑 授权码：{data.get('authcode', '未知')}"""
         else:
             reply = f"❌ 获取失败：{result.get('msg', '未知错误')}"
-
-        yield event.plain_result(reply)
-
-    async def _handle_query_auth_by_qq(self, event: AstrMessageEvent, args):
-        """处理通过QQ查询授权"""
-        sender_qq = event.get_sender_id()
-
-        # 如果用户传了QQ号，使用用户传的，否则使用发送者的QQ
-        if len(args) >= 1:
-            qq = args[0]
-        else:
-            qq = sender_qq
-
-        yield event.plain_result(f"📝 正在查询QQ {qq} 的授权，请稍候...")
-
-        result = await self.client.query_auth_by_qq(
-            appid=self.default_appid,
-            qq=qq
-        )
-
-        code = result.get("code")
-        if code == 1 or str(code) == "1":
-            # 去除HTML标签，提取纯文本
-            msg = self.client._strip_html(result.get("msg", ""))
-            if msg:
-                reply = f"✅ 查询结果（QQ: {qq}）：\n\n{msg}"
-            else:
-                reply = f"✅ 查询成功（QQ: {qq}）"
-        else:
-            # 失败时也尝试清理HTML
-            msg = self.client._strip_html(result.get("msg", "未找到相关授权信息"))
-            reply = f"❌ {msg}"
 
         yield event.plain_result(reply)
 
