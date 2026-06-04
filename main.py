@@ -18,7 +18,7 @@ from .nathan_auth_client import NathanAuthClient
     "astrbot_plugin_nathan_auth",
     "langke06",
     "Nathan-Auth 授权管理插件，支持域名授权管理、封禁解封、查询等功能",
-    "1.1.0",
+    "1.2.0",
 )
 class NathanAuthPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
