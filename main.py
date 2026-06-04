@@ -5,6 +5,9 @@ Nathan-Auth 授权管理插件 - AstrBot 版本
 提供域名授权管理、封禁解封、查询等功能
 """
 
+import asyncio
+import re
+from urllib.parse import urlparse
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
@@ -53,6 +56,8 @@ class NathanAuthPlugin(Star):
 
         # 初始化客户端
         self.client = None
+        self.site_name = "Nathan-Auth"  # 默认名称，异步获取后会更新
+
         if self.base_url and self.webkey:
             self.client = NathanAuthClient(
                 base_url=self.base_url,
@@ -63,9 +68,50 @@ class NathanAuthPlugin(Star):
                 default_authdate=self.default_authdate,
                 default_ip=self.default_ip
             )
-            logger.info("Nathan-Auth 插件加载完成")
+            # 异步获取网站标题
+            asyncio.create_task(self._fetch_site_name())
+            logger.info("授权插件加载完成")
         else:
-            logger.warning("Nathan-Auth 插件配置不完整，请在配置页面设置 base_url 和 webkey")
+            logger.warning("授权插件配置不完整，请在配置页面设置 base_url 和 webkey")
+
+    async def _fetch_site_name(self):
+        """异步获取网站标题"""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.base_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    html = await response.text()
+                    # 解析 title 标签
+                    import re
+                    match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+                    if match:
+                        title = match.group(1).strip()
+                        # 清理标题，移除常见的后缀
+                        title = re.sub(r'[\|\-–—].*$', '', title).strip()
+                        if title:
+                            self.site_name = title
+                            logger.info(f"获取到网站标题: {self.site_name}")
+        except Exception as e:
+            logger.debug(f"获取网站标题失败: {e}")
+            # 使用域名作为备用
+            self.site_name = self._extract_site_name_from_domain(self.base_url)
+
+    def _extract_site_name_from_domain(self, base_url: str) -> str:
+        """从域名提取网站名（备用方法）"""
+        if not base_url:
+            return "Nathan-Auth"
+        try:
+            parsed = urlparse(base_url)
+            domain = parsed.netloc or parsed.path
+            if domain:
+                domain = domain.replace("www.", "").split(":")[0]
+                parts = domain.split(".")
+                if len(parts) >= 2:
+                    return parts[-2]
+                return domain
+        except Exception:
+            pass
+        return "Nathan-Auth"
 
     def _check_permission(self, event: AstrMessageEvent) -> bool:
         """检查用户是否有权限使用命令"""
@@ -90,24 +136,24 @@ class NathanAuthPlugin(Star):
         """检查配置是否完整"""
         return self.client is not None and self.base_url and self.webkey
 
-    @filter.command("plan")
+    @filter.command("授权")
     async def plan_command(self, event: AstrMessageEvent):
-        '''Nathan-Auth 授权管理命令 - 用法：/plan [操作] [参数...]
+        '''Nathan-Auth 授权管理命令 - 用法：/授权 [操作] [参数...]
 
         可用操作：
-        /plan - 显示帮助菜单
-        /plan 查询 <域名> - 查询域名授权状态
-        /plan 添加 <域名> <QQ> [天数] - 添加域名授权
-        /plan 封禁 <域名> <原因> - 封禁域名授权
-        /plan 解封 <域名> - 解封域名授权
-        /plan 删除 <域名> - 删除域名授权
-        /plan 应用列表 - 获取应用列表
-        /plan 生成卡密 <类型> <数量> [天数] - 生成卡密（类型：1=余额卡密，2=授权卡密）
-        /plan 更换 <旧域名> <新域名> <QQ> - 更换授权域名
+        /授权 - 显示帮助菜单
+        /授权 查询 <域名> - 查询域名授权状态
+        /授权 添加 <域名> <QQ> [天数] - 添加域名授权
+        /授权 封禁 <域名> <原因> - 封禁域名授权
+        /授权 解封 <域名> - 解封域名授权
+        /授权 删除 <域名> - 删除域名授权
+        /授权 应用列表 - 获取应用列表
+        /授权 生成卡密 <类型> <数量> [天数] - 生成卡密（类型：1=余额卡密，2=授权卡密）
+        /授权 更换 <旧域名> <新域名> <QQ> - 更换授权域名
         '''
         # 检查权限
         if not self._check_permission(event):
-            yield event.plain_result("❌ 你没有权限使用此命令")
+            yield event.plain_result("❌ 叼毛，让你用了吗。你就用！！！！")
             return
 
         # 检查配置
@@ -119,8 +165,8 @@ class NathanAuthPlugin(Star):
         message = event.message_str.strip()
         parts = message.split()
 
-        # 移除命令本身 (/plan)
-        if len(parts) > 0 and parts[0].lower() in ['/plan', 'plan']:
+        # 移除命令本身 (/授权)
+        if len(parts) > 0 and parts[0] in ['/授权', '授权']:
             parts = parts[1:]
 
         action = parts[0] if len(parts) > 0 else ""
@@ -159,39 +205,39 @@ class NathanAuthPlugin(Star):
                 async for result in self._handle_replace(event, args):
                     yield result
             else:
-                yield event.plain_result(f"❌ 未知操作：{action}\n请发送 /plan 查看帮助")
+                yield event.plain_result(f"❌ 未知操作：{action}\n请发送 /授权 查看帮助")
         except Exception as e:
             logger.error(f"Nathan-Auth 命令执行错误: {e}")
             yield event.plain_result(f"❌ 执行出错: {str(e)}")
 
     async def _show_menu(self, event: AstrMessageEvent):
         """显示帮助菜单"""
-        menu_text = """🔐 Nathan-Auth 授权管理插件
+        menu_text = f"""{self.site_name} 授权管理插件
 
-📋 命令列表：
+命令列表：
 ━━━━━━━━━━━━━━━━
-🔹 /plan - 显示此菜单
-🔹 /plan 查询 <域名> - 查询域名授权状态
-🔹 /plan 添加 <域名> <QQ> [天数] - 添加域名授权
-🔹 /plan 封禁 <域名> <原因> - 封禁域名授权
-🔹 /plan 解封 <域名> - 解封域名授权
-🔹 /plan 删除 <域名> - 删除域名授权
-🔹 /plan 应用列表 - 获取应用列表
-🔹 /plan 生成卡密 <类型> <数量> [天数] - 生成卡密
-🔹 /plan 更换 <旧域名> <新域名> <QQ> - 更换授权域名
+/授权 - 显示此菜单
+/授权 查询 <域名> - 查询域名授权状态
+/授权 添加 <域名> <QQ> [天数] - 添加域名授权
+/授权 封禁 <域名> <原因> - 封禁域名授权
+/授权 解封 <域名> - 解封域名授权
+/授权 删除 <域名> - 删除域名授权
+/授权 应用列表 - 获取应用列表
+/授权 生成卡密 <类型> <数量> [天数] - 生成卡密
+/授权 更换 <旧域名> <新域名> <QQ> - 更换授权域名
 ━━━━━━━━━━━━━━━━
 
-💡 使用示例：
-• /plan 查询 example.com
-• /plan 添加 example.com 123456789
-• /plan 添加 example.com 123456789 365
-• /plan 封禁 example.com 违规使用
-• /plan 解封 example.com
-• /plan 删除 example.com
-• /plan 生成卡密 2 10 365
-• /plan 更换 old.com new.com 123456789
+使用示例：
+• /授权 查询 example.com
+• /授权 添加 example.com 123456789
+• /授权 添加 example.com 123456789 365
+• /授权 封禁 example.com 违规使用
+• /授权 解封 example.com
+• /授权 删除 example.com
+• /授权 生成卡密 2 10 365
+• /授权 更换 old.com new.com 123456789
 
-📌 说明：
+说明：
 • 天数为0表示永久授权
 • 卡密类型：1=余额卡密，2=授权卡密
 """
@@ -200,7 +246,7 @@ class NathanAuthPlugin(Star):
     async def _handle_query(self, event: AstrMessageEvent, args):
         """处理查询授权"""
         if len(args) < 1:
-            yield event.plain_result("❌ 用法：/plan 查询 <域名>\n示例：/plan 查询 example.com")
+            yield event.plain_result("❌ 用法：/授权 查询 <域名>\n示例：/授权 查询 example.com")
             return
 
         domain = args[0]
@@ -225,7 +271,7 @@ class NathanAuthPlugin(Star):
     async def _handle_add(self, event: AstrMessageEvent, args):
         """处理添加授权"""
         if len(args) < 2:
-            yield event.plain_result("❌ 用法：/plan 添加 <域名> <QQ> [天数]\n示例：/plan 添加 example.com 123456789")
+            yield event.plain_result("❌ 用法：/授权 添加 <域名> <QQ> [天数]\n示例：/授权 添加 example.com 123456789")
             return
 
         domain = args[0]
@@ -256,7 +302,7 @@ class NathanAuthPlugin(Star):
     async def _handle_freeze(self, event: AstrMessageEvent, args):
         """处理封禁授权"""
         if len(args) < 2:
-            yield event.plain_result("❌ 用法：/plan 封禁 <域名> <原因>\n示例：/plan 封禁 example.com 违规使用")
+            yield event.plain_result("❌ 用法：/授权 封禁 <域名> <原因>\n示例：/授权 封禁 example.com 违规使用")
             return
 
         domain = args[0]
@@ -277,7 +323,7 @@ class NathanAuthPlugin(Star):
     async def _handle_unseal(self, event: AstrMessageEvent, args):
         """处理解封授权"""
         if len(args) < 1:
-            yield event.plain_result("❌ 用法：/plan 解封 <域名>\n示例：/plan 解封 example.com")
+            yield event.plain_result("❌ 用法：/授权 解封 <域名>\n示例：/授权 解封 example.com")
             return
 
         domain = args[0]
@@ -297,7 +343,7 @@ class NathanAuthPlugin(Star):
     async def _handle_delete(self, event: AstrMessageEvent, args):
         """处理删除授权"""
         if len(args) < 1:
-            yield event.plain_result("❌ 用法：/plan 删除 <域名>\n示例：/plan 删除 example.com")
+            yield event.plain_result("❌ 用法：/授权 删除 <域名>\n示例：/授权 删除 example.com")
             return
 
         domain = args[0]
@@ -334,7 +380,7 @@ class NathanAuthPlugin(Star):
     async def _handle_create_card(self, event: AstrMessageEvent, args):
         """处理生成卡密"""
         if len(args) < 2:
-            yield event.plain_result("❌ 用法：/plan 生成卡密 <类型> <数量> [天数]\n类型：1=余额卡密，2=授权卡密\n示例：/plan 生成卡密 2 10 365")
+            yield event.plain_result("❌ 用法：/授权 生成卡密 <类型> <数量> [天数]\n类型：1=余额卡密，2=授权卡密\n示例：/授权 生成卡密 2 10 365")
             return
 
         card_type = args[0]
@@ -382,7 +428,7 @@ class NathanAuthPlugin(Star):
     async def _handle_replace(self, event: AstrMessageEvent, args):
         """处理更换授权域名"""
         if len(args) < 3:
-            yield event.plain_result("❌ 用法：/plan 更换 <旧域名> <新域名> <QQ>\n示例：/plan 更换 old.com new.com 123456789")
+            yield event.plain_result("❌ 用法：/授权 更换 <旧域名> <新域名> <QQ>\n示例：/授权 更换 old.com new.com 123456789")
             return
 
         old_domain = args[0]

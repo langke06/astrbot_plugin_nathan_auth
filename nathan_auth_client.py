@@ -3,6 +3,7 @@ Nathan-Auth 授权管理系统 API 客户端 (异步版本)
 提供域名授权管理、封禁解封、查询等功能
 """
 
+import json
 import aiohttp
 from typing import Optional, Dict, Any
 from urllib.parse import urljoin
@@ -60,11 +61,17 @@ class NathanAuthClient:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
                     response.raise_for_status()
-                    return await response.json()
+                    # 先获取文本，再尝试解析JSON
+                    text = await response.text()
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError:
+                        # 如果返回的不是JSON，可能是错误页面
+                        return {"code": "0", "msg": f"API返回非JSON数据: {text[:200]}"}
         except aiohttp.ClientError as e:
             return {"code": "0", "msg": f"请求失败: {str(e)}"}
         except Exception as e:
-            return {"code": "0", "msg": f"解析响应失败: {str(e)}"}
+            return {"code": "0", "msg": f"请求异常: {str(e)}"}
 
     async def query_auth(self, appid: str, url: str) -> Dict[str, Any]:
         """
