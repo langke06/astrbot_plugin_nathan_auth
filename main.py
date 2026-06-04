@@ -84,7 +84,6 @@ class NathanAuthPlugin(Star):
                 async with session.get(self.base_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                     html = await response.text()
                     # 解析 title 标签
-                    import re
                     match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
                     if match:
                         title = match.group(1).strip()
@@ -191,9 +190,9 @@ class NathanAuthPlugin(Star):
         action = parts[0] if len(parts) > 0 else ""
         args = parts[1:] if len(parts) > 1 else []
 
-        # 显示菜单（无需权限检查）
-        if not action:
-            async for result in self._show_menu(event):
+        # 显示菜单 + all 命令
+        if not action or action == "all":
+            async for result in self._show_all_menu(event):
                 yield result
             return
 
@@ -267,6 +266,30 @@ class NathanAuthPlugin(Star):
             logger.error(f"Nathan-Auth 命令执行错误: {e}")
             yield event.plain_result(f"❌ 执行出错: {str(e)}")
 
+    async def _show_all_menu(self, event: AstrMessageEvent):
+        """显示完整帮助菜单（/授权 all）"""
+        menu_text = f"""{self.site_name} 授权管理插件
+
+使用示例：
+• /授权 查询 example.com
+• /授权 查询授权 [QQ]
+• /授权 代理查询 [QQ]
+• /授权 添加 example.com 123456789
+• /授权 添加 example.com 123456789 365
+• /授权 封禁 example.com 违规使用
+• /授权 解封 example.com
+• /授权 删除 example.com
+• /授权 生成卡密 2 10 365
+• /授权 更换 old.com new.com 123456789
+• /授权 授权码 example.com
+
+说明：
+• 天数为0表示永久授权
+• 卡密类型：1=余额卡密，2=授权卡密
+• [QQ]为可选参数，不填则查询/使用你自己的QQ
+"""
+        yield event.plain_result(menu_text)
+
     async def _show_menu(self, event: AstrMessageEvent):
         """显示帮助菜单"""
         is_admin = self._is_admin(event)
@@ -317,7 +340,7 @@ class NathanAuthPlugin(Star):
         domain = args[0]
         result = await self.client.query_auth(self.default_appid, domain)
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             data = result.get("data", {})
             status_text = "✅ 正常" if data.get("status") == "1" else "❌ 封禁"
             reply = f"""📋 授权查询结果
@@ -351,7 +374,7 @@ class NathanAuthPlugin(Star):
             authdate=authdate
         )
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             date_text = "永久" if authdate == "0" else f"{authdate}天"
             reply = f"""✅ 授权添加成功
 
@@ -375,7 +398,7 @@ class NathanAuthPlugin(Star):
 
         result = await self.client.freeze_auth(self.default_appid, domain, reason)
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             reply = f"""✅ 授权封禁成功
 
 🌐 域名：{domain}
@@ -395,7 +418,7 @@ class NathanAuthPlugin(Star):
 
         result = await self.client.unseal_auth(self.default_appid, domain)
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             reply = f"""✅ 授权解封成功
 
 🌐 域名：{domain}
@@ -415,7 +438,7 @@ class NathanAuthPlugin(Star):
 
         result = await self.client.del_auth(self.default_appid, domain)
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             reply = f"""✅ 授权删除成功
 
 🌐 域名：{domain}
@@ -429,7 +452,7 @@ class NathanAuthPlugin(Star):
         """处理获取应用列表"""
         result = await self.client.get_applist()
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             apps = result.get("data", [])
             if not apps:
                 reply = "📭 暂无应用数据"
@@ -473,7 +496,7 @@ class NathanAuthPlugin(Star):
             money=money
         )
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             cards = result.get("data", [])
             type_text = "余额卡密" if card_type == "1" else "授权卡密"
             reply = f"""✅ 卡密生成成功
@@ -520,7 +543,7 @@ class NathanAuthPlugin(Star):
             new_url=new_domain
         )
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             reply = f"""✅ 授权更换成功
 
 🌐 旧域名：{old_domain}
@@ -551,7 +574,7 @@ class NathanAuthPlugin(Star):
             url=domain
         )
 
-        if result.get("code") == "1":
+        if str(result.get("code")) == "1":
             data = result.get("data", {})
             reply = f"""✅ 授权码获取成功
 
@@ -580,7 +603,8 @@ class NathanAuthPlugin(Star):
             qq=qq
         )
 
-        if result.get("code") == "1":
+        code = result.get("code")
+        if code == 1 or str(code) == "1":
             # 去除HTML标签，提取纯文本
             msg = self.client._strip_html(result.get("msg", ""))
             if msg:
@@ -588,7 +612,9 @@ class NathanAuthPlugin(Star):
             else:
                 reply = f"✅ 查询成功（QQ: {qq}）"
         else:
-            reply = f"❌ 查询失败：{result.get('msg', '未找到相关授权信息')}"
+            # 失败时也尝试清理HTML
+            msg = self.client._strip_html(result.get("msg", "未找到相关授权信息"))
+            reply = f"❌ {msg}"
 
         yield event.plain_result(reply)
 
@@ -609,14 +635,16 @@ class NathanAuthPlugin(Star):
             qq=qq
         )
 
-        if result.get("code") == "1":
+        code = result.get("code")
+        if code == 1 or str(code) == "1":
             msg = self.client._strip_html(result.get("msg", ""))
             if msg:
                 reply = f"✅ 代理查询结果（QQ: {qq}）：\n\n{msg}"
             else:
                 reply = f"✅ 查询成功（QQ: {qq}）"
         else:
-            reply = f"❌ 查询失败：{result.get('msg', '该用户不是授权商')}"
+            msg = self.client._strip_html(result.get("msg", "该用户不是授权商"))
+            reply = f"❌ {msg}"
 
         yield event.plain_result(reply)
 
