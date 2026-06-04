@@ -150,6 +150,7 @@ class NathanAuthPlugin(Star):
         /授权 应用列表 - 获取应用列表
         /授权 生成卡密 <类型> <数量> [天数] - 生成卡密（类型：1=余额卡密，2=授权卡密）
         /授权 更换 <旧域名> <新域名> <QQ> - 更换授权域名
+        /授权 授权码 <域名> - 获取域名授权码
         '''
         # 检查权限
         if not self._check_permission(event):
@@ -204,6 +205,9 @@ class NathanAuthPlugin(Star):
             elif action == "更换":
                 async for result in self._handle_replace(event, args):
                     yield result
+            elif action == "授权码":
+                async for result in self._handle_authcode(event, args):
+                    yield result
             else:
                 yield event.plain_result(f"❌ 未知操作：{action}\n请发送 /授权 查看帮助")
         except Exception as e:
@@ -225,6 +229,7 @@ class NathanAuthPlugin(Star):
 /授权 应用列表 - 获取应用列表
 /授权 生成卡密 <类型> <数量> [天数] - 生成卡密
 /授权 更换 <旧域名> <新域名> <QQ> - 更换授权域名
+/授权 授权码 <域名> - 获取域名授权码
 ━━━━━━━━━━━━━━━━
 
 使用示例：
@@ -236,6 +241,7 @@ class NathanAuthPlugin(Star):
 • /授权 删除 example.com
 • /授权 生成卡密 2 10 365
 • /授权 更换 old.com new.com 123456789
+• /授权 授权码 example.com
 
 说明：
 • 天数为0表示永久授权
@@ -451,6 +457,33 @@ class NathanAuthPlugin(Star):
 👤 QQ：{qq}"""
         else:
             reply = f"❌ 更换失败：{result.get('msg', '未知错误')}"
+
+        yield event.plain_result(reply)
+
+    async def _handle_authcode(self, event: AstrMessageEvent, args):
+        """处理获取域名授权码"""
+        if len(args) < 1:
+            yield event.plain_result("❌ 用法：/授权 授权码 <域名>\n示例：/授权 授权码 example.com")
+            return
+
+        domain = args[0]
+
+        yield event.plain_result(f"📝 正在获取授权码，请稍候...")
+
+        result = await self.client.get_url_authcode(
+            appid=self.default_appid,
+            url=domain
+        )
+
+        if result.get("code") == "1":
+            data = result.get("data", {})
+            reply = f"""✅ 授权码获取成功
+
+🌐 域名：{data.get('url', domain)}
+👤 QQ：{data.get('qq', '未知')}
+🔑 授权码：{data.get('authcode', '未知')}"""
+        else:
+            reply = f"❌ 获取失败：{result.get('msg', '未知错误')}"
 
         yield event.plain_result(reply)
 

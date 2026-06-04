@@ -488,3 +488,20 @@ class NathanAuthClient:
             params["phone"] = phone
 
         return await self._make_request("create_auth", params)
+
+    async def get_url_authcode(self, appid: str, url: str) -> Dict[str, Any]:
+        """
+        获取域名授权码
+
+        Args:
+            appid: 应用ID
+            url: 授权域名
+
+        Returns:
+            授权码信息，包含 url、qq、authcode
+        """
+        params = {
+            "appid": appid,
+            "url": url
+        }
+        return await self._make_request("UrlAuthCode", params)
