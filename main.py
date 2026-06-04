@@ -18,7 +18,7 @@ from .nathan_auth_client import NathanAuthClient
     "astrbot_plugin_nathan_auth",
     "langke06",
     "Nathan-Auth 授权管理插件，支持域名授权管理、封禁解封、查询等功能",
-    "1.3.0",
+    "1.3.1",
 )
 class NathanAuthPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -531,21 +531,23 @@ class NathanAuthPlugin(Star):
         is_admin = self._is_admin(event)
         sender_qq = event.get_sender_id()
 
-        if is_admin:
-            # 管理员：需要旧域名、新域名、QQ
-            if len(args) < 3:
-                yield event.plain_result("❌ 用法：/授权 更改域名 <旧域名> <新域名> <QQ>\n示例：/授权 更改域名 old.com new.com 123456789")
-                return
-            old_domain = args[0]
-            new_domain = args[1]
-            qq = args[2]
-        else:
-            # 普通用户：只需要旧域名和新域名，自动使用发送者的QQ
-            if len(args) < 2:
+        if len(args) < 2:
+            if is_admin:
+                yield event.plain_result("❌ 用法：/授权 更改域名 <旧域名> <新域名> [QQ]\n示例：/授权 更改域名 old.com new.com 123456789")
+            else:
                 yield event.plain_result("❌ 用法：/授权 更改域名 <旧域名> <新域名>\n示例：/授权 更改域名 old.com new.com")
+            return
+
+        old_domain = args[0]
+        new_domain = args[1]
+
+        if len(args) >= 3:
+            if is_admin:
+                qq = args[2]
+            else:
+                yield event.plain_result("❌ 你没有权限指定QQ号\n用法：/授权 更改域名 <旧域名> <新域名>（自动使用你的QQ）")
                 return
-            old_domain = args[0]
-            new_domain = args[1]
+        else:
             qq = sender_qq
 
         yield event.plain_result(f"📝 正在更改域名，请稍候...")
