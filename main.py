@@ -215,6 +215,24 @@ class NathanAuthPlugin(Star):
                 yield result
             return
 
+        # 查询授权功能：所有用户可用，默认查询自己的QQ
+        if action == "查询授权":
+            if not self._check_permission(event, allow_guest=True):
+                yield event.plain_result("❌ 你已被禁止使用此功能")
+                return
+            async for result in self._handle_query_auth_by_qq(event, args):
+                yield result
+            return
+
+        # 代理查询功能：所有用户可用
+        if action == "代理查询":
+            if not self._check_permission(event, allow_guest=True):
+                yield event.plain_result("❌ 你已被禁止使用此功能")
+                return
+            async for result in self._handle_query_agent(event, args):
+                yield result
+            return
+
         # 其他功能需要管理员权限
         if not self._check_permission(event):
             yield event.plain_result("❌ 你没有权限使用此命令")
@@ -258,6 +276,8 @@ class NathanAuthPlugin(Star):
 
 使用示例：
 • /授权 查询 example.com
+• /授权 查询授权 [QQ]
+• /授权 代理查询 [QQ]
 • /授权 添加 example.com 123456789
 • /授权 添加 example.com 123456789 365
 • /授权 封禁 example.com 违规使用
@@ -270,16 +290,20 @@ class NathanAuthPlugin(Star):
 说明：
 • 天数为0表示永久授权
 • 卡密类型：1=余额卡密，2=授权卡密
+• [QQ]为可选参数，不填则查询/使用你自己的QQ
 """
         else:
             menu_text = f"""{self.site_name} 授权管理插件
 
 使用示例：
 • /授权 查询 example.com
+• /授权 查询授权
+• /授权 代理查询
 • /授权 更换 old.com new.com
 
 说明：
 • 查询功能对所有用户开放
+• 查询授权/代理查询默认使用你的QQ
 • 更换授权会自动使用你的QQ
 """
         yield event.plain_result(menu_text)
@@ -536,6 +560,63 @@ class NathanAuthPlugin(Star):
 🔑 授权码：{data.get('authcode', '未知')}"""
         else:
             reply = f"❌ 获取失败：{result.get('msg', '未知错误')}"
+
+        yield event.plain_result(reply)
+
+    async def _handle_query_auth_by_qq(self, event: AstrMessageEvent, args):
+        """处理通过QQ查询授权"""
+        sender_qq = event.get_sender_id()
+
+        # 如果用户传了QQ号，使用用户传的，否则使用发送者的QQ
+        if len(args) >= 1:
+            qq = args[0]
+        else:
+            qq = sender_qq
+
+        yield event.plain_result(f"📝 正在查询QQ {qq} 的授权，请稍候...")
+
+        result = await self.client.query_auth_by_qq(
+            appid=self.default_appid,
+            qq=qq
+        )
+
+        if result.get("code") == "1":
+            # 去除HTML标签，提取纯文本
+            msg = self.client._strip_html(result.get("msg", ""))
+            if msg:
+                reply = f"✅ 查询结果（QQ: {qq}）：\n\n{msg}"
+            else:
+                reply = f"✅ 查询成功（QQ: {qq}）"
+        else:
+            reply = f"❌ 查询失败：{result.get('msg', '未找到相关授权信息')}"
+
+        yield event.plain_result(reply)
+
+    async def _handle_query_agent(self, event: AstrMessageEvent, args):
+        """处理代理查询"""
+        sender_qq = event.get_sender_id()
+
+        # 如果用户传了QQ号，使用用户传的，否则使用发送者的QQ
+        if len(args) >= 1:
+            qq = args[0]
+        else:
+            qq = sender_qq
+
+        yield event.plain_result(f"📝 正在查询QQ {qq} 的代理信息，请稍候...")
+
+        result = await self.client.query_agent(
+            appid=self.default_appid,
+            qq=qq
+        )
+
+        if result.get("code") == "1":
+            msg = self.client._strip_html(result.get("msg", ""))
+            if msg:
+                reply = f"✅ 代理查询结果（QQ: {qq}）：\n\n{msg}"
+            else:
+                reply = f"✅ 查询成功（QQ: {qq}）"
+        else:
+            reply = f"❌ 查询失败：{result.get('msg', '该用户不是授权商')}"
 
         yield event.plain_result(reply)
 

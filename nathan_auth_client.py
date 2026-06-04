@@ -4,6 +4,7 @@ Nathan-Auth 授权管理系统 API 客户端 (异步版本)
 """
 
 import json
+import re
 import aiohttp
 from typing import Optional, Dict, Any
 from urllib.parse import urljoin
@@ -42,6 +43,49 @@ class NathanAuthClient:
         self.default_authdate = default_authdate
         self.default_ip = default_ip
         self.api_prefix = "/api/Index"
+        self._ajax_session: Optional[aiohttp.ClientSession] = None
+        self._ajax_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/136.0.0.0 Safari/537.36",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+
+    async def _ensure_ajax_session(self) -> aiohttp.ClientSession:
+        """确保有一个带 Cookie 的 session"""
+        if self._ajax_session is None or self._ajax_session.closed:
+            self._ajax_session = aiohttp.ClientSession(headers=self._ajax_headers)
+            # 请求首页获取 PHPSESSID
+            try:
+                async with self._ajax_session.get(self.base_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    await resp.text()
+            except Exception:
+                pass
+        return self._ajax_session
+
+    async def _make_ajax_request(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        发送 Ajax POST 请求（带 session cookie）
+
+        Args:
+            endpoint: Ajax 端点 (如 query_auth, query_agent)
+            params: 请求参数
+
+        Returns:
+            API响应数据
+        """
+        url = urljoin(self.base_url, f"/index/Ajax/{endpoint}")
+
+        try:
+            session = await self._ensure_ajax_session()
+            async with session.post(url, data=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                text = await response.text()
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return {"code": "0", "msg": f"API返回非JSON数据: {text[:200]}"}
+        except aiohttp.ClientError as e:
+            return {"code": "0", "msg": f"请求失败: {str(e)}"}
+        except Exception as e:
+            return {"code": "0", "msg": f"请求异常: {str(e)}"}
 
     async def _make_request(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -505,3 +549,58 @@ class NathanAuthClient:
             "url": url
         }
         return await self._make_request("UrlAuthCode", params)
+
+    async def query_auth_by_qq(self, appid: str, qq: str) -> Dict[str, Any]:
+        """
+        通过QQ查询授权
+
+        Args:
+            appid: 应用ID
+            qq: QQ号
+
+        Returns:
+            授权查询结果
+        """
+        params = {
+            "appid": appid,
+            "type": "qq",
+            "value": qq
+        }
+        return await self._make_ajax_request("query_auth", params)
+
+    async def query_agent(self, appid: str, qq: str) -> Dict[str, Any]:
+        """
+        代理查询
+
+        Args:
+            appid: 应用ID
+            qq: QQ号
+
+        Returns:
+            代理查询结果
+        """
+        params = {
+            "appid": appid,
+            "type": "qq",
+            "value": qq
+        }
+        return await self._make_ajax_request("query_agent", params)
+
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        """去除HTML标签，提取纯文本"""
+        if not text:
+            return text
+        # 替换换行标签
+        text = re.sub(r'<br\s*/?>', '\n', text)
+        text = re.sub(r'<hr\s*/?>', '\n───────\n', text)
+        # 去除其他HTML标签
+        text = re.sub(r'<[^>]+>', '', text)
+        # 处理HTML实体
+        text = text.replace('&nbsp;', ' ')
+        text = text.replace('&lt;', '<')
+        text = text.replace('&gt;', '>')
+        text = text.replace('&amp;', '&')
+        # 清理多余空白
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
