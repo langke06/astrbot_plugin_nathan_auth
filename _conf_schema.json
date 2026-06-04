@@ -1,0 +1,65 @@
+{
+  "base_url": {
+    "description": "授权系统域名",
+    "type": "string",
+    "hint": "填写 Nathan-Auth 授权系统的域名，例如: https://auth.example.com/",
+    "obvious_hint": true,
+    "default": ""
+  },
+  "webkey": {
+    "description": "网站安全密钥",
+    "type": "string",
+    "hint": "在 Nathan-Auth 后台获取的 webkey",
+    "obvious_hint": true,
+    "default": ""
+  },
+  "admin_name": {
+    "description": "管理员用户名",
+    "type": "string",
+    "hint": "添加授权时需要的管理员账号",
+    "obvious_hint": true,
+    "default": ""
+  },
+  "admin_password": {
+    "description": "管理员密码",
+    "type": "string",
+    "hint": "添加授权时需要的管理员密码",
+    "obvious_hint": true,
+    "default": ""
+  },
+  "default_appid": {
+    "description": "默认应用ID",
+    "type": "string",
+    "hint": "默认的应用ID，如果不确定请保持默认值 1",
+    "obvious_hint": true,
+    "default": "1"
+  },
+  "default_authdate": {
+    "description": "默认授权天数",
+    "type": "string",
+    "hint": "0 表示永久授权，其他数字表示天数",
+    "obvious_hint": true,
+    "default": "0"
+  },
+  "default_ip": {
+    "description": "默认服务器IP",
+    "type": "string",
+    "hint": "授权的服务器IP，默认 127.0.0.1",
+    "obvious_hint": true,
+    "default": "127.0.0.1"
+  },
+  "admin_qqs": {
+    "description": "管理员QQ列表",
+    "type": "list",
+    "hint": "允许使用命令的管理员QQ号，留空则允许所有人使用（不推荐）",
+    "obvious_hint": true,
+    "default": []
+  },
+  "admin_groups": {
+    "description": "允许的群组列表",
+    "type": "list",
+    "hint": "允许使用命令的群组ID，留空则不限制",
+    "obvious_hint": true,
+    "default": []
+  }
+}

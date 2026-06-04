@@ -1,0 +1,42 @@
+# Nathan-Auth 授权管理插件配置
+# 请根据你的 Nathan-Auth 系统配置填写以下信息
+
+# 授权系统域名（必填）
+# 例如：https://auth.example.com/
+base_url: ""
+
+# 网站安全密钥（必填）
+# 在 Nathan-Auth 后台获取
+webkey: ""
+
+# 管理员用户名（添加授权时需要）
+admin_name: ""
+
+# 管理员密码（添加授权时需要）
+admin_password: ""
+
+# 默认应用ID
+# 如果不确定，保持默认值 "1"
+default_appid: "1"
+
+# 默认授权天数
+# 0 表示永久授权，其他数字表示天数
+default_authdate: "0"
+
+# 默认服务器IP
+default_ip: "127.0.0.1"
+
+# 权限配置
+# 允许使用命令的管理员QQ列表（为空则允许所有人使用，不推荐）
+admin_qqs: []
+# 示例：
+# admin_qqs:
+#   - "123456789"
+#   - "987654321"
+
+# 允许使用命令的群组列表（为空则不限制）
+admin_groups: []
+# 示例：
+# admin_groups:
+#   - "123456789"
+#   - "987654321"
