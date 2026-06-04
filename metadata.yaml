@@ -2,4 +2,4 @@ name: astrbot_plugin_nathan_auth
 author: langke06
 desc: Nathan-Auth 授权管理插件，支持域名授权管理、封禁解封、查询等功能
 version: 1.1.0
-repo: ''
+repo: 'https://github.com/langke06/astrbot_plugin_nathan_auth'
